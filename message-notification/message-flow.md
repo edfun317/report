@@ -2,19 +2,28 @@
 
 ```mermaid
 flowchart TD
-    A[Google Pub/Sub] -->|Subscribe| B[Pod Server]
-    B -->|Receive Message| C[Parse & Validate Data]
-    C -->|Validated| D{Check Message Type}
-    D -->|Different Categories| E[Find User IDs from Server Cache]
-    E -->|User IDs Collected| F{Check Server Cache}
-    F -->|Cache Hit| H{Is User Online?}
-    F -->|Cache Miss| G[Get Message from Redis]
-    G -->|Message Retrieved| H
-    H -->|Yes| I[Push via WebSocket]
-    H -->|No| J{Check isOnlineOnly}
-    J -->|isOnlineOnly=false| K[Batch Pool]
-    K -->|Async Write| L[(Redis List Storage)]
-    J -->|isOnlineOnly=true| M[Discard Message]
+    subgraph Message Notification
+        A[Message Pub/Sub] -->|Subscribe| B[Pod Server]
+        B -->|Receive Message| C[Parse & Validate Data]
+        C -->|Validated| D{Check Message Type}
+        D -->|Different Categories| E[Find User IDs from Server Cache]
+        E -->|User IDs Collected| F{Check Server Cache}
+        F -->|Cache Hit| H{Is User Online?}
+        F -->|Cache Miss| G[Get Message from Redis]
+        G -->|Message Retrieved| H
+        H -->|Yes| I[Push via WebSocket]
+        I -->|Message Pushed| X[Publish Exposure Event]
+        H -->|No| J{Check isOnlineOnly}
+        J -->|isOnlineOnly=false| K[Batch Pool]
+        K -->|Async Write| L[(Redis List Storage)]
+        J -->|isOnlineOnly=true| M[Discard Message]
+    end
+
+    subgraph Exposure Logging
+        N[Exposure Pub/Sub] -->|Subscribe| O[Log Consumer]
+        O -->|Process Event| P[Parse Exposure Data]
+        P -->|Store| Q[(Log Storage)]
+    end
     
     style A fill:#E8F5E9
     style B fill:#FFF3E0
@@ -29,6 +38,11 @@ flowchart TD
     style K fill:#FFF3E0
     style L fill:#E3F2FD
     style M fill:#FFF3E0
+    style N fill:#E8F5E9
+    style O fill:#FFF3E0
+    style P fill:#FFF3E0
+    style Q fill:#E3F2FD
+    style X fill:#E8F5E9
 
 classDef decision fill:#FCE4EC,stroke:#333,stroke-width:2px;
 classDef process fill:#FFF3E0,stroke:#333,stroke-width:2px;
@@ -58,6 +72,7 @@ classDef io fill:#E8F5E9,stroke:#333,stroke-width:2px;
 
 5. **Message Delivery**
    - Online users receive messages via WebSocket
+   - After successful delivery, exposure event is published
    - For offline users:
      - If isOnlineOnly=false: Messages are stored in Redis List
      - If isOnlineOnly=true: Messages are discarded
@@ -66,3 +81,8 @@ classDef io fill:#E8F5E9,stroke:#333,stroke-width:2px;
    - Messages for offline users are processed through a batch pool
    - Batch pool performs asynchronous writes to Redis
    - Fixed batch size or time interval determines write frequency
+
+7. **Exposure Logging**
+   - Exposure events are published to dedicated Pub/Sub topic
+   - Log consumer processes exposure events
+   - Events are parsed and stored in log storage
